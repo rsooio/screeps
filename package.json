@@ -1,0 +1,23 @@
+{
+  "name": "screeps",
+  "version": "0.0.1",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "push": "vite build -w --",
+    "build": "rescript build -w"
+  },
+  "output": "esm",
+  "keywords": [],
+  "author": "rsooio",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/minimist": "^1.2.2",
+    "@types/node": "^18.15.11",
+    "dotenv": "^16.0.3",
+    "minimist": "^1.2.8",
+    "rescript": "^10.1.4",
+    "rollup-plugin-screeps2": "^0.0.1",
+    "vite": "^4.1.4"
+  }
+}

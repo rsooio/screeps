@@ -1,0 +1,1 @@
+let loop = () => Js.log()

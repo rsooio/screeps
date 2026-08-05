@@ -1,0 +1,26 @@
+{
+  "name": "screeps-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Screeps AI written in TypeScript",
+  "scripts": {
+    "build": "rolldown -c",
+    "watch": "rolldown -cw",
+    "check": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.tools.json",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "dry-run": "npm run build && node --env-file-if-exists=.env scripts/upload.ts --dry-run",
+    "push": "npm run build && node --env-file-if-exists=.env scripts/upload.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/screeps": "^3.4.0",
+    "prettier": "^3.9.6",
+    "rolldown": "^1.2.3",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "es-toolkit": "^1.50.0"
+  }
+}

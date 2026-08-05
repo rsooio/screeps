@@ -3,5 +3,5 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["rolldown.config.ts", "scripts/**/*.ts"]
+  "include": ["rolldown.config.ts", "vitest.config.ts", "scripts/**/*.ts"]
 }

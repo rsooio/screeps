@@ -7,7 +7,10 @@
   "scripts": {
     "build": "rolldown -c",
     "watch": "rolldown -cw",
-    "check": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.tools.json",
+    "check": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.tools.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "npm run build && vitest run tests/integration",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "dry-run": "npm run build && node --env-file-if-exists=.env scripts/upload.ts --dry-run",
@@ -18,7 +21,9 @@
     "@types/screeps": "^3.4.0",
     "prettier": "^3.9.6",
     "rolldown": "^1.2.3",
-    "typescript": "^7.0.2"
+    "screeps-server-mockup": "^1.5.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "es-toolkit": "^1.50.0"

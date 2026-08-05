@@ -1,0 +1,93 @@
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { readFileSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { ScreepsServer } from "screeps-server-mockup";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
+
+interface RoomObject {
+  type: string;
+  store?: { energy?: number };
+  progress?: number;
+  user?: string;
+  [key: string]: unknown;
+}
+
+describe("集成测试：任务系统在真实引擎中运行", () => {
+  let server: ScreepsServer;
+  let bot: Awaited<ReturnType<ScreepsServer["world"]["addBot"]>>;
+  const consoleLogs: string[] = [];
+
+  beforeAll(async () => {
+    const mainPath = join(root, "dist/main.js");
+    if (!existsSync(mainPath)) {
+      throw new Error("dist/main.js 不存在，请先执行 npm run build");
+    }
+    const mainJs = readFileSync(mainPath, "utf8");
+
+    server = new ScreepsServer();
+    await server.world.reset();
+    await server.world.stubWorld();
+    bot = await server.world.addBot({
+      username: "bot",
+      room: "W0N1",
+      x: 25,
+      y: 25,
+      modules: { main: mainJs },
+    });
+    bot.on("console", (logs: string[]) => {
+      for (const line of logs) consoleLogs.push(line);
+    });
+    await server.start();
+  });
+
+  afterAll(() => {
+    server.stop();
+  });
+
+  it("房间控制器归属 bot（否则无法升级）", async () => {
+    const objects = (await server.world.roomObjects("W0N1")) as RoomObject[];
+    const controller = objects.find((o) => o.type === "controller");
+    expect(controller).toBeDefined();
+    // addBot 放置 spawn 后控制器应自动归属该用户
+    expect(controller?.user).toBeDefined();
+  });
+
+  it("60 tick 内：发布任务、生产 creep、采集能量回填", async () => {
+    for (let i = 0; i < 60; i++) {
+      await server.tick();
+    }
+
+    // Memory 类型已全局声明（interface Memory 含 tasks），直接标注类型
+    const memory: Memory = JSON.parse(await bot.memory);
+    expect(Object.keys(memory.creeps).length).toBeGreaterThan(0);
+    expect(memory.tasks.length).toBeGreaterThan(0);
+    // 至少有一个任务被领取
+    expect(memory.tasks.some((t) => t.claimedBy)).toBe(true);
+
+    const objects = (await server.world.roomObjects("W0N1")) as RoomObject[];
+    const spawn = objects.find((o) => o.type === "spawn");
+    // 第一只 creep 消耗 200+ 能量后，harvest creep 应开始回填
+    expect(spawn?.store?.energy ?? 0).toBeGreaterThan(0);
+  });
+
+  it("400 tick 内：控制器升级进度增长（冷启动后 upgrade creep 就位）", async () => {
+    for (let i = 0; i < 400; i++) {
+      await server.tick();
+    }
+    const objects = (await server.world.roomObjects("W0N1")) as RoomObject[];
+    const controller = objects.find((o) => o.type === "controller");
+    expect(controller?.progress ?? 0).toBeGreaterThan(0);
+  });
+
+  it("无脚本错误", () => {
+    const errors = consoleLogs.filter(
+      (l) =>
+        l.includes("[error]") ||
+        l.includes("Error") ||
+        l.includes("Unknown module"),
+    );
+    expect(errors).toEqual([]);
+  });
+});

@@ -92,8 +92,9 @@ Screeps 的模块系统是 CommonJS 风格：每个模块是独立文件，用 `
 ## 测试
 
 - **单元测试**（快）：任务队列纯函数、生产决策，不依赖 Game 全局
-- **集成测试**（慢，约 2 分钟）：screeps-server-mockup 启动真实引擎，把 `dist/main.js` 作为 bot 运行，验证：控制器归属、生产 creep、能量回填、升级进度增长、无脚本错误
-- 集成测试需先 `npm run build`；`server/` 目录是 mockup 运行时数据，已 gitignore
+- **集成测试**（慢，约 3 分钟）：screeps-server-mockup 启动真实引擎，把 `dist/main.js` 作为 bot 运行，验证：控制器归属、生产 creep、能量回填、升级进度增长、无脚本错误
+- 集成测试**自动采样**（每 20 tick）并生成报告：`reports/<时间戳>/integration.html`（曲线图：劳动力分布、spawn/source 能量、控制器进度、任务队列，Chart.js 走 CDN，hover 看数值）+ `integration.json`（原始数据）；每次运行留档，历史报告可回溯对比
+- 集成测试需先 `npm run build`；`server/`、`reports/` 是运行产物，已 gitignore
 
 ## 类型安全约定
 

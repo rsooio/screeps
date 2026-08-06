@@ -6,6 +6,7 @@ declare module "screeps-server-mockup" {
   export class ScreepsServer {
     constructor(opts?: Record<string, unknown>);
     world: {
+      gameTime: Promise<number>;
       reset(): Promise<void>;
       stubWorld(): Promise<void>;
       addRoom(roomName: string): Promise<void>;

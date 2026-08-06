@@ -1,24 +1,18 @@
 /**
  * 主循环：服务器每个 tick 调用一次。
- * 流程：发布任务 -> spawn 生产决策 -> creep 领取/执行任务 -> 清理。
+ * 控制回路（docs/architecture.md）：感知 → 声明 → 调度 → 分配 → 执行 → 反馈。
  */
-import {
-  createTask,
-  makeTaskId,
-  findNearestOpenTask,
-  isTaskClaimable,
-  removeTask,
-  shouldTransferToHarvest,
-} from "./tasks";
-import type { Task } from "./tasks";
-import { runHarvest, runUpgrade, runBuild } from "./executors";
-import { decideSpawn, MAX_CREEPS } from "./spawn";
+import { allocate, taskValue, reconcile, shouldSwitchToDeliver } from "./tasks";
+import type { IdleCreepInput, Task } from "./tasks";
+import { declareDemands, rateOfSpawn, PREP_RATE } from "./declare";
+import { EXECUTORS } from "./executors";
+import { decideSpawn } from "./spawn";
 
 function ensureMemory(): void {
   if (!Memory.tasks) Memory.tasks = [];
 }
 
-/** 统计各任务的当前持有者数（从存活 creep 实时统计，死亡自动不计） */
+/** 统计各任务的当前执行者数（从存活 creep 实时统计，死亡自动不计） */
 function holderCounts(): Map<string, number> {
   const counts = new Map<string, number>();
   for (const name in Game.creeps) {
@@ -28,65 +22,52 @@ function holderCounts(): Map<string, number> {
   return counts;
 }
 
-/** 可领取的任务列表（持有者数未达容量的任务） */
-function claimableTasks(): Task[] {
-  const holders = holderCounts();
-  return Memory.tasks.filter((t) => isTaskClaimable(t, holders));
+/** 组合距离（方案 B）：creep → 最近 source + creep → 任务目标 */
+function combinedDistance(
+  creep: Creep,
+  task: Task,
+  sourcesByRoom: Map<string, Source[]>,
+): number {
+  if (task.action === "deliver") {
+    // 源侧动态：以最近 source 的距离代表采集路程
+    const sources = sourcesByRoom.get(task.roomName) ?? [];
+    let toSource = Infinity;
+    for (const s of sources) {
+      const d = creep.pos.getRangeTo(s.pos);
+      if (d < toSource) toSource = d;
+    }
+    if (toSource === Infinity) return Infinity;
+    const target = Game.getObjectById<RoomObject & _HasId>(task.targetId);
+    return target ? toSource + creep.pos.getRangeTo(target.pos) : Infinity;
+  }
+  const target = Game.getObjectById<RoomObject & _HasId>(task.targetId);
+  return target ? creep.pos.getRangeTo(target.pos) : Infinity;
 }
 
-/** 指定房间是否存在可领取的 harvest 任务 */
-function harvestClaimableIn(roomName: string): boolean {
-  return claimableTasks().some(
-    (t) => t.type === "harvest" && t.roomName === roomName,
-  );
-}
-
-/**
- * 发布/回收任务（幂等）：
- * - harvest 无固定目标，存在性由房间能量缺口驱动（不足发布、满则回收）；
- *   容量 = source 数（每 source 约 1 个采集者，产能低于再生速率）
- * - upgrade 容量 = MAX_CREEPS（多 creep 升级无冲突，兜底任务）
- * - build 每工地一个任务，容量 1
- */
-function publishTasks(): void {
-  for (const roomName in Game.rooms) {
-    const room = Game.rooms[roomName];
-
-    const harvestId = makeTaskId("harvest", roomName);
-    const harvestTask = Memory.tasks.find((t) => t.id === harvestId);
-    if (room.energyAvailable < room.energyCapacityAvailable) {
-      if (!harvestTask) {
-        Memory.tasks.push(
-          createTask("harvest", roomName, room.find(FIND_SOURCES).length),
-        );
-      }
-    } else if (harvestTask) {
-      // 能量已满：回收采集任务，采集者自动转 upgrade/build
-      Memory.tasks = removeTask(Memory.tasks, harvestId);
-    }
-
-    for (const site of room.find(FIND_CONSTRUCTION_SITES)) {
-      const id = makeTaskId("build", site.id);
-      if (!Memory.tasks.some((t) => t.id === id)) {
-        Memory.tasks.push(createTask("build", roomName, site.id, 1));
-      }
-    }
-
-    // upgrade 兜底任务：保证无人空闲
-    if (room.controller?.my) {
-      const id = makeTaskId("upgrade", room.controller.id);
-      if (!Memory.tasks.some((t) => t.id === id)) {
-        Memory.tasks.push(
-          createTask("upgrade", roomName, room.controller.id, MAX_CREEPS),
-        );
-      }
+/** spawn：按"边际效用仍为正的任务数"决定是否生产 */
+/** 各 deliver 任务当前的消耗速率（需求强度，实时注入效用计算） */
+function rateByTaskId(): Map<string, number> {
+  const rates = new Map<string, number>();
+  for (const t of Memory.tasks) {
+    if (t.action !== "deliver") continue;
+    const obj = Game.getObjectById(t.targetId as Id<Structure>);
+    if (!obj) continue;
+    if (obj.structureType === STRUCTURE_SPAWN) {
+      const rate = rateOfSpawn(obj as StructureSpawn);
+      if (rate > 0) rates.set(t.id, rate);
+    } else if (obj.structureType === STRUCTURE_EXTENSION) {
+      rates.set(t.id, PREP_RATE);
     }
   }
+  return rates;
 }
 
-/** spawn：按任务量与房间状态决定是否生产 */
-function runSpawns(): void {
-  const openTaskCount = claimableTasks().length;
+function runSpawns(holders: ReadonlyMap<string, number>): void {
+  const rates = rateByTaskId();
+  const openTaskCount = Memory.tasks.filter(
+    (t) =>
+      taskValue(t.action, holders.get(t.id) ?? 0, rates.get(t.id) ?? 0) > 0,
+  ).length;
   for (const name in Game.spawns) {
     const spawn = Game.spawns[name];
     const body = decideSpawn({
@@ -102,72 +83,89 @@ function runSpawns(): void {
   }
 }
 
-/** creep：领取任务并执行；任务失效则移除 */
-function runCreeps(): void {
+/** creep：执行任务；idle 或应转岗者进入分配池，一次分配 */
+function runCreeps(
+  holders: ReadonlyMap<string, number>,
+  rates: ReadonlyMap<string, number>,
+): void {
+  const sourcesByRoom = new Map<string, Source[]>();
+  for (const roomName in Game.rooms) {
+    sourcesByRoom.set(roomName, Game.rooms[roomName].find(FIND_SOURCES));
+  }
+
+  const idle: IdleCreepInput[] = [];
   for (const name in Game.creeps) {
     const creep = Game.creeps[name];
     let task: Task | undefined = creep.memory.taskId
       ? Memory.tasks.find((t) => t.id === creep.memory.taskId)
       : undefined;
 
-    // 转岗：固定目标任务持有者能量耗尽且 harvest 可领时，转岗采集
-    if (
-      task &&
-      shouldTransferToHarvest(
-        task,
-        creep.store.getUsedCapacity(RESOURCE_ENERGY),
-        harvestClaimableIn(creep.room.name),
-      )
-    ) {
-      delete creep.memory.taskId;
-      task = undefined;
+    if (task && task.action !== "deliver") {
+      // 转岗判断：能量耗尽且 deliver 边际效用高于当前任务（去除自己后）
+      const deliverTask = Memory.tasks.find((t) => t.action === "deliver");
+      const deliverMarginal = deliverTask
+        ? taskValue(
+            "deliver",
+            holders.get(deliverTask.id) ?? 0,
+            rates.get(deliverTask.id) ?? 0,
+          )
+        : -Infinity;
+      const currentMarginal = taskValue(
+        task.action,
+        (holders.get(task.id) ?? 0) - 1,
+      );
+      if (
+        shouldSwitchToDeliver(
+          task,
+          creep.store.getUsedCapacity(RESOURCE_ENERGY),
+          deliverMarginal,
+          currentMarginal,
+        )
+      ) {
+        delete creep.memory.taskId;
+        task = undefined;
+      }
     }
 
     if (!task) {
-      // 就近领取：可领取任务里选目标最近的（同一优先级内）
+      // 进入分配池（距离只对未分配者计算）
       const distByTaskId = new Map<string, number>();
-      for (const t of claimableTasks()) {
-        if (t.type === "harvest") {
-          // 无固定目标：以该房间最近 source 的距离作为任务距离
-          const sources = Game.rooms[t.roomName]?.find(FIND_SOURCES);
-          if (sources && sources.length > 0) {
-            distByTaskId.set(t.id, creep.pos.getRangeTo(sources[0].pos));
-          }
-        } else {
-          const obj = Game.getObjectById<RoomObject & _HasId>(t.targetId);
-          if (obj) distByTaskId.set(t.id, creep.pos.getRangeTo(obj.pos));
-        }
+      for (const t of Memory.tasks) {
+        const d = combinedDistance(creep, t, sourcesByRoom);
+        if (Number.isFinite(d)) distByTaskId.set(t.id, d);
       }
-      const next = findNearestOpenTask(claimableTasks(), distByTaskId);
-      if (next) {
-        creep.memory.taskId = next.id;
-        task = next;
-      }
+      idle.push({
+        name,
+        body: creep.body.map((p) => p.type),
+        distByTaskId,
+      });
+      continue;
     }
 
-    if (!task) continue;
-
-    // 固定目标任务失效（site 建成等）→ 移除任务重新领取
-    if (task.type !== "harvest") {
-      const target = Game.getObjectById<RoomObject & _HasId>(task.targetId);
-      if (!target) {
-        Memory.tasks = removeTask(Memory.tasks, task.id);
-        delete creep.memory.taskId;
-        continue;
-      }
+    // 固定目标任务失效（工地建成等）→ 回收任务
+    const target = Game.getObjectById<RoomObject & _HasId>(task.targetId);
+    if (!target) {
+      Memory.tasks = Memory.tasks.filter((t) => t.id !== task.id);
+      delete creep.memory.taskId;
+      idle.push({
+        name,
+        body: creep.body.map((p) => p.type),
+        distByTaskId: new Map(),
+      });
+      continue;
     }
 
-    switch (task.type) {
-      case "harvest":
-        runHarvest(creep);
-        break;
-      case "build":
-        runBuild(creep, task);
-        break;
-      case "upgrade":
-        runUpgrade(creep, task);
-        break;
-    }
+    EXECUTORS[task.action](creep, task);
+  }
+
+  // 分配：边际效用贪心（无硬编码容量）
+  const allocation = allocate(idle, Memory.tasks, holders, rates);
+  for (const [creepName, taskId] of allocation) {
+    const creep = Game.creeps[creepName];
+    creep.memory.taskId = taskId;
+    // 本 tick 已分配：立即执行一轮（避免多等一 tick）
+    const task = Memory.tasks.find((t) => t.id === taskId);
+    if (task) EXECUTORS[task.action](creep, task);
   }
 }
 
@@ -180,8 +178,11 @@ function cleanMemory(): void {
 
 export function loop(): void {
   ensureMemory();
-  publishTasks();
-  runSpawns();
-  runCreeps();
+  // 声明 → 调度：需求黑板转化为任务黑板
+  Memory.tasks = reconcile(Memory.tasks, declareDemands());
+  const holders = holderCounts();
+  const rates = rateByTaskId();
+  runSpawns(holders);
+  runCreeps(holders, rates);
   cleanMemory();
 }

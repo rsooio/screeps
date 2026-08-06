@@ -1,53 +1,55 @@
 /**
- * 任务执行层：把任务翻译成 creep 的每 tick 动作。
- * 依赖 Game 全局（薄层），决策逻辑在 tasks.ts / spawn.ts（纯函数）。
+ * 执行层：把任务动作翻译成 creep 的每 tick 操作。
+ * 依赖 Game 全局（薄层），决策逻辑在 tasks.ts（纯函数）。
+ * 源侧动态：能量来源（source）由执行者自行就近选择，任务只声明目的地/目标。
+ *
+ * 能量状态采用滞回控制（两态机：采集中/工作中）：
+ * 满载才转工作，耗尽才转采集，中间区间保持当前状态——
+ * 避免单次动作消耗导致的往返振荡（无论一次清空还是逐 tick 消耗，
+ * 都落在同一状态机内，动作无需分类）。
  */
-import type { TargetedTask } from "./tasks";
+import { nextWorkingState } from "./tasks";
+import type { Task } from "./tasks";
 
-/** 找最近的有能量的 source（harvest 无固定目标，动态选择；升级/建造 creep 自给自足） */
+/** 找最近的有能量的 source（源侧动态，无固定目标） */
 function findNearestSource(pos: RoomPosition): Source | null {
   return pos.findClosestByPath(FIND_SOURCES);
 }
 
-/** 找最近的还有空间收能量的 spawn/extension */
-function findEnergyDropTarget(
-  pos: RoomPosition,
-): StructureSpawn | StructureExtension | null {
-  return pos.findClosestByPath(FIND_MY_STRUCTURES, {
-    filter: (s) =>
-      (s.structureType === STRUCTURE_SPAWN ||
-        s.structureType === STRUCTURE_EXTENSION) &&
-      s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-  });
+/** 读取并推进 creep 的工作状态（滞回） */
+function isWorking(creep: Creep): boolean {
+  creep.memory.working = nextWorkingState(
+    creep.memory.working,
+    creep.store.getUsedCapacity(RESOURCE_ENERGY),
+    creep.store.getFreeCapacity(RESOURCE_ENERGY),
+  );
+  return creep.memory.working ?? false;
 }
 
-/**
- * harvest 任务（无固定目标）：空载时动态选最近的 source 采集，
- * 满载后送回最近的 spawn/extension（无处可送时原地等待）。
- */
-export function runHarvest(creep: Creep): void {
-  if (creep.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+/** deliver：按滞回状态采集或送往任务声明的目的地 */
+export function runDeliver(creep: Creep, task: Task): void {
+  if (!isWorking(creep)) {
     const source = findNearestSource(creep.pos);
     if (source) {
       const result = creep.harvest(source);
       if (result === ERR_NOT_IN_RANGE) creep.moveTo(source);
     }
   } else {
-    const target = findEnergyDropTarget(creep.pos);
-    if (target) {
+    const target = Game.getObjectById(task.targetId as Id<AnyStoreStructure>);
+    if (target && target.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
       const result = creep.transfer(target, RESOURCE_ENERGY);
       if (result === ERR_NOT_IN_RANGE) creep.moveTo(target);
     }
   }
 }
 
-/** upgrade 任务：能量采满后去控制器升级，耗尽后再采 */
-export function runUpgrade(creep: Creep, task: TargetedTask): void {
+/** upgrade：滞回控制，满载后连续升级，耗尽才回采 */
+export function runUpgrade(creep: Creep, task: Task): void {
   const controller = Game.getObjectById(
     task.targetId as Id<StructureController>,
   );
   if (!controller) return;
-  if (creep.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+  if (!isWorking(creep)) {
     const source = findNearestSource(creep.pos);
     if (source) {
       const result = creep.harvest(source);
@@ -59,11 +61,11 @@ export function runUpgrade(creep: Creep, task: TargetedTask): void {
   }
 }
 
-/** build 任务：能量采满后去工地建造，耗尽后再采 */
-export function runBuild(creep: Creep, task: TargetedTask): void {
+/** build：滞回控制，满载后连续建造，耗尽才回采 */
+export function runBuild(creep: Creep, task: Task): void {
   const site = Game.getObjectById(task.targetId as Id<ConstructionSite>);
   if (!site) return;
-  if (creep.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+  if (!isWorking(creep)) {
     const source = findNearestSource(creep.pos);
     if (source) {
       const result = creep.harvest(source);
@@ -74,3 +76,13 @@ export function runBuild(creep: Creep, task: TargetedTask): void {
     if (result === ERR_NOT_IN_RANGE) creep.moveTo(site);
   }
 }
+
+/** 动作 → 执行器（动作是唯一语义源，新增动作在此加一行） */
+export const EXECUTORS: Record<
+  Task["action"],
+  (creep: Creep, task: Task) => void
+> = {
+  deliver: runDeliver,
+  build: runBuild,
+  upgrade: runUpgrade,
+};

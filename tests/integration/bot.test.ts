@@ -76,8 +76,8 @@ describe("集成测试：任务系统在真实引擎中运行", () => {
     expect(spawn?.store?.energy ?? 0).toBeGreaterThan(0);
   });
 
-  it("500 tick 内：控制器升级进度增长（采集者饱和后多余 creep 转岗升级）", async () => {
-    for (let i = 0; i < 500; i++) {
+  it("700 tick 内：控制器升级进度增长（升级 creep 完成首个工作周期）", async () => {
+    for (let i = 0; i < 700; i++) {
       await server.tick();
     }
     const objects = (await server.world.roomObjects("W0N1")) as RoomObject[];

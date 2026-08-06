@@ -77,6 +77,7 @@ Screeps 的模块系统是 CommonJS 风格：每个模块是独立文件，用 `
 ## 任务系统架构
 
 > 控制架构设计文档：[docs/architecture.md](docs/architecture.md)（黑板架构 + 边际效用分配）
+> 游戏阶段与行为：[docs/game-phases.md](docs/game-phases.md) · 开发路线图：[ROADMAP.md](ROADMAP.md)
 
 无角色概念，纯任务驱动：
 

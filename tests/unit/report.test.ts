@@ -49,12 +49,17 @@ describe("report 生成器", () => {
 
 describe("writeReport（时间戳目录留档）", () => {
   it("输出到时间戳子目录，HTML 与 JSON 并存", () => {
-    const { mkdtempSync, rmSync } = require("node:fs") as typeof import("node:fs");
+    const { mkdtempSync, rmSync } =
+      require("node:fs") as typeof import("node:fs");
     const { tmpdir } = require("node:os") as typeof import("node:os");
     const { join } = require("node:path") as typeof import("node:path");
     const base = mkdtempSync(join(tmpdir(), "screeps-report-"));
     try {
-      const html = writeReport([mkSample(20)], { title: "t", durationMs: 1 }, base);
+      const html = writeReport(
+        [mkSample(20)],
+        { title: "t", durationMs: 1 },
+        base,
+      );
       // 时间戳子目录：YYYYMMDD-HHmmss
       expect(html).toMatch(/\d{8}-\d{6}\/integration\.html$/);
       const { existsSync } = require("node:fs") as typeof import("node:fs");

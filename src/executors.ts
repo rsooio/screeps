@@ -16,6 +16,18 @@ function findNearestSource(pos: RoomPosition): Source | null {
   return pos.findClosestByPath(FIND_SOURCES);
 }
 
+/**
+ * 矿工基础设施行为（非任务）：固定在最近 source 旁连续采集，
+ * 无 CARRY → 能量自动掉落，由 deliver 执行者拾取。
+ * 不参与任务经济，由 spawn 决策按 source 缺位补充。
+ */
+export function runMiner(creep: Creep): void {
+  const source = findNearestSource(creep.pos);
+  if (!source) return;
+  const result = creep.harvest(source);
+  if (result === ERR_NOT_IN_RANGE) creep.moveTo(source);
+}
+
 /** 读取并推进 creep 的工作状态（滞回） */
 function isWorking(creep: Creep): boolean {
   creep.memory.working = nextWorkingState(
@@ -26,13 +38,22 @@ function isWorking(creep: Creep): boolean {
   return creep.memory.working ?? false;
 }
 
-/** deliver：按滞回状态采集或送往任务声明的目的地 */
+/** deliver：按滞回状态采集（优先拾取掉落能量，否则自采）或送往任务声明的目的地 */
 export function runDeliver(creep: Creep, task: Task): void {
   if (!isWorking(creep)) {
-    const source = findNearestSource(creep.pos);
-    if (source) {
-      const result = creep.harvest(source);
-      if (result === ERR_NOT_IN_RANGE) creep.moveTo(source);
+    // 源侧动态：优先拾取最近的掉落能量（如基础设施产出），否则自行采集
+    const dropped = creep.pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
+      filter: (r) => r.resourceType === RESOURCE_ENERGY,
+    });
+    if (dropped) {
+      const result = creep.pickup(dropped);
+      if (result === ERR_NOT_IN_RANGE) creep.moveTo(dropped);
+    } else {
+      const source = findNearestSource(creep.pos);
+      if (source) {
+        const result = creep.harvest(source);
+        if (result === ERR_NOT_IN_RANGE) creep.moveTo(source);
+      }
     }
   } else {
     const target = Game.getObjectById(task.targetId as Id<AnyStoreStructure>);

@@ -7,7 +7,7 @@ import {
   structureRate,
   taskValue,
   reconcile,
-  shouldSwitchToDeliver,
+  shouldResignTask,
   taskUtility,
   ACTION_REQUIREMENTS,
 } from "../../src/tasks";
@@ -212,38 +212,32 @@ describe("allocate（边际效用贪心分配）", () => {
   });
 });
 
-describe("shouldSwitchToDeliver（转岗）", () => {
-  const upgradeTask: Task = {
-    id: "upgrade:C1",
-    action: "upgrade",
-    targetId: "C1",
+describe("shouldResignTask（周期边界再评估）", () => {
+  const mkTask = (
+    action: "deliver" | "upgrade" | "build",
+    targetId: string,
+  ): Task => ({
+    id: `${action}:${targetId}`,
+    action,
+    targetId,
     roomName: "W0N1",
-  };
-
-  it("能量耗尽且 deliver 效用更高时转岗", () => {
-    expect(shouldSwitchToDeliver(upgradeTask, 0, 75, 27)).toBe(true);
   });
 
-  it("deliver 效用不高于当前任务时不转岗", () => {
-    expect(shouldSwitchToDeliver(upgradeTask, 0, 20, 27)).toBe(false);
+  it("能量耗尽且其他任务价值更高时释放（deliver 惰性修复）", () => {
+    // deliver 执行者耗尽，upgrade 价值更高 → 释放转岗
+    expect(shouldResignTask(mkTask("deliver", "S1"), 0, 5, 30)).toBe(true);
   });
 
-  it("能量未耗尽不转岗", () => {
-    expect(shouldSwitchToDeliver(upgradeTask, 10, 75, 27)).toBe(false);
+  it("能量耗尽但当前任务价值仍最高时不释放", () => {
+    expect(shouldResignTask(mkTask("upgrade", "C1"), 0, 30, 5)).toBe(false);
   });
 
-  it("deliver 执行者不转岗", () => {
-    const deliverTask: Task = {
-      id: "deliver:S1",
-      action: "deliver",
-      targetId: "S1",
-      roomName: "W0N1",
-    };
-    expect(shouldSwitchToDeliver(deliverTask, 0, 75, 27)).toBe(false);
+  it("能量未耗尽不评估（避免每 tick 抖振）", () => {
+    expect(shouldResignTask(mkTask("deliver", "S1"), 10, 5, 30)).toBe(false);
   });
 
-  it("无任务不转岗", () => {
-    expect(shouldSwitchToDeliver(undefined, 0, 75, 27)).toBe(false);
+  it("无任务不释放", () => {
+    expect(shouldResignTask(undefined, 0, 5, 30)).toBe(false);
   });
 });
 

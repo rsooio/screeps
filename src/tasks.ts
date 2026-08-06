@@ -31,19 +31,6 @@ export interface Task {
   roomName: string;
 }
 
-/** 动作 → 能力要求映射（唯一事实源，查 docs.screeps.com/api 确认） */
-export const ACTION_REQUIREMENTS: Record<
-  Action,
-  { capability: readonly BodyPartConstant[] }
-> = {
-  // 采集+运输需要 WORK（harvest）与 CARRY（承载）
-  deliver: { capability: [WORK, CARRY] },
-  // 文档：build Requires WORK and CARRY
-  build: { capability: [WORK, CARRY] },
-  // 文档：upgradeController Requires WORK and CARRY
-  upgrade: { capability: [WORK, CARRY] },
-};
-
 /** 动作 → 基础优先级（需求紧急度） */
 export const BASE_PRIORITY: Record<Action, number> = {
   deliver: 100,
@@ -114,6 +101,19 @@ export function taskUtility(
 ): number {
   return taskValue(action, holders, rate) - distance * DISTANCE_WEIGHT;
 }
+
+/** 动作 → 能力要求映射（唯一事实源，查 docs.screeps.com/api 确认） */
+export const ACTION_REQUIREMENTS: Record<
+  Action,
+  { capability: readonly BodyPartConstant[] }
+> = {
+  // 采集+运输需要 WORK（harvest）与 CARRY（承载）
+  deliver: { capability: [WORK, CARRY] },
+  // 文档：build Requires WORK and CARRY
+  build: { capability: [WORK, CARRY] },
+  // 文档：upgradeController Requires WORK and CARRY
+  upgrade: { capability: [WORK, CARRY] },
+};
 
 export function capabilityOf(action: Action): readonly BodyPartConstant[] {
   return ACTION_REQUIREMENTS[action].capability;
@@ -258,19 +258,18 @@ export function allocate(
 }
 
 /**
- * 转岗判断：固定任务持有者能量耗尽，且 deliver 的边际效用高于当前任务
- * （去除自己后）时，释放任务重新分配。能量耗尽 = 工作周期边界，不会每 tick 抖振。
+ * 周期边界再评估（分配惰性修复）：
+ * 执行者在能量耗尽（工作周期边界）时，比较当前任务（去除自己后）的价值
+ * 与其他可执行任务（不含当前任务）的最高价值——其他更高则释放重新分配。
+ * 耗尽时才评估，不会每 tick 抖振；释放后由分配器重新就近分配（可能领回原任务）。
  */
-export function shouldSwitchToDeliver(
+export function shouldResignTask(
   task: Task | undefined,
   usedEnergy: number,
-  deliverMarginal: number,
-  currentMarginal: number,
+  currentValue: number,
+  bestOtherValue: number,
 ): boolean {
   return (
-    task !== undefined &&
-    task.action !== "deliver" &&
-    usedEnergy === 0 &&
-    deliverMarginal > currentMarginal
+    task !== undefined && usedEnergy === 0 && bestOtherValue > currentValue
   );
 }

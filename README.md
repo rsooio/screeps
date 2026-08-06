@@ -76,6 +76,8 @@ Screeps 的模块系统是 CommonJS 风格：每个模块是独立文件，用 `
 
 ## 任务系统架构
 
+> 控制架构设计文档：[docs/architecture.md](docs/architecture.md)（黑板架构 + 边际效用分配）
+
 无角色概念，纯任务驱动：
 
 - **任务**：`{ id, type, targetId, claimedBy }`，存于 `Memory.tasks`。id 由 类型+目标 决定，天然幂等

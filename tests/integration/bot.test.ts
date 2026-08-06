@@ -63,8 +63,12 @@ describe("集成测试：任务系统在真实引擎中运行", () => {
     const memory: Memory = JSON.parse(await bot.memory);
     expect(Object.keys(memory.creeps).length).toBeGreaterThan(0);
     expect(memory.tasks.length).toBeGreaterThan(0);
-    // 至少有一个任务被领取
-    expect(memory.tasks.some((t) => t.claimedBy)).toBe(true);
+    // 至少有一个 creep 挂上了任务（harvest 多槽位任务被领取后不依赖 claimedBy 标记）
+    expect(
+      Object.values(memory.creeps).some(
+        (m) => (m as { taskId?: string }).taskId,
+      ),
+    ).toBe(true);
 
     const objects = (await server.world.roomObjects("W0N1")) as RoomObject[];
     const spawn = objects.find((o) => o.type === "spawn");
@@ -72,8 +76,8 @@ describe("集成测试：任务系统在真实引擎中运行", () => {
     expect(spawn?.store?.energy ?? 0).toBeGreaterThan(0);
   });
 
-  it("400 tick 内：控制器升级进度增长（冷启动后 upgrade creep 就位）", async () => {
-    for (let i = 0; i < 400; i++) {
+  it("500 tick 内：控制器升级进度增长（采集者饱和后多余 creep 转岗升级）", async () => {
+    for (let i = 0; i < 500; i++) {
       await server.tick();
     }
     const objects = (await server.world.roomObjects("W0N1")) as RoomObject[];

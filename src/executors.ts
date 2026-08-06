@@ -2,9 +2,9 @@
  * 任务执行层：把任务翻译成 creep 的每 tick 动作。
  * 依赖 Game 全局（薄层），决策逻辑在 tasks.ts / spawn.ts（纯函数）。
  */
-import type { Task } from "./tasks";
+import type { TargetedTask } from "./tasks";
 
-/** 找最近的有能量的 source（升级/建造 creep 自给自足用） */
+/** 找最近的有能量的 source（harvest 无固定目标，动态选择；升级/建造 creep 自给自足） */
 function findNearestSource(pos: RoomPosition): Source | null {
   return pos.findClosestByPath(FIND_SOURCES);
 }
@@ -21,13 +21,17 @@ function findEnergyDropTarget(
   });
 }
 
-/** harvest 任务：从 source 采能量，送回 spawn/extension（满载且无处可送时原地等待） */
-export function runHarvest(creep: Creep, task: Task): void {
-  const source = Game.getObjectById(task.targetId as Id<Source>);
-  if (!source) return;
+/**
+ * harvest 任务（无固定目标）：空载时动态选最近的 source 采集，
+ * 满载后送回最近的 spawn/extension（无处可送时原地等待）。
+ */
+export function runHarvest(creep: Creep): void {
   if (creep.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
-    const result = creep.harvest(source);
-    if (result === ERR_NOT_IN_RANGE) creep.moveTo(source);
+    const source = findNearestSource(creep.pos);
+    if (source) {
+      const result = creep.harvest(source);
+      if (result === ERR_NOT_IN_RANGE) creep.moveTo(source);
+    }
   } else {
     const target = findEnergyDropTarget(creep.pos);
     if (target) {
@@ -37,13 +41,13 @@ export function runHarvest(creep: Creep, task: Task): void {
   }
 }
 
-/** upgrade 任务：能量空时自采，然后去控制器升级 */
-export function runUpgrade(creep: Creep, task: Task): void {
+/** upgrade 任务：能量采满后去控制器升级，耗尽后再采 */
+export function runUpgrade(creep: Creep, task: TargetedTask): void {
   const controller = Game.getObjectById(
     task.targetId as Id<StructureController>,
   );
   if (!controller) return;
-  if (creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0) {
+  if (creep.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
     const source = findNearestSource(creep.pos);
     if (source) {
       const result = creep.harvest(source);
@@ -55,11 +59,11 @@ export function runUpgrade(creep: Creep, task: Task): void {
   }
 }
 
-/** build 任务：能量空时自采，然后去工地建造 */
-export function runBuild(creep: Creep, task: Task): void {
+/** build 任务：能量采满后去工地建造，耗尽后再采 */
+export function runBuild(creep: Creep, task: TargetedTask): void {
   const site = Game.getObjectById(task.targetId as Id<ConstructionSite>);
   if (!site) return;
-  if (creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0) {
+  if (creep.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
     const source = findNearestSource(creep.pos);
     if (source) {
       const result = creep.harvest(source);
@@ -70,12 +74,3 @@ export function runBuild(creep: Creep, task: Task): void {
     if (result === ERR_NOT_IN_RANGE) creep.moveTo(site);
   }
 }
-
-export const EXECUTORS: Record<
-  Task["type"],
-  (creep: Creep, task: Task) => void
-> = {
-  harvest: runHarvest,
-  upgrade: runUpgrade,
-  build: runBuild,
-};

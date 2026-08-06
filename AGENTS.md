@@ -5,9 +5,10 @@ Screeps AI 项目（TypeScript）。本文指导代码编写与信息获取。
 ## 信息获取（写代码前）
 
 1. **架构设计**：完整控制架构（黑板/需求驱动/边际效用/滞回）先读 [docs/architecture.md](docs/architecture.md)
-2. **游戏 API**：动作的能力要求（Requires）查 https://docs.screeps.com/api/，不要凭记忆写 body part 要求
-3. **类型定义**：Screeps 全局类型在 `node_modules/@types/screeps/index.d.ts`；不确定的 API 签名先查这里，不要猜
-4. **引擎行为**：服务器端机制（如模块 require 语义、Memory 序列化）查 `@screeps/engine` / `@screeps/driver` 源码或官方文档，不靠推测
+2. **游戏阶段与行为**：涉及殖民地发展/结构/防御/经济行为的改动，先读 [docs/game-phases.md](docs/game-phases.md)（阶段摘要）确认上下文，再查 [ROADMAP.md](ROADMAP.md) 确认方向；**机制细节以官方行为文档网页为准**（非 API 页）：https://docs.screeps.com/control.html（RCL/结构解锁）、invaders.html（入侵者行为）、resources.html（矿物/化合物）、market.html、power.html，不要凭二手总结做机制决策
+3. **游戏 API**：动作的能力要求（Requires）查 https://docs.screeps.com/api/，不要凭记忆写 body part 要求
+4. **类型定义**：Screeps 全局类型在 `node_modules/@types/screeps/index.d.ts`；不确定的 API 签名先查这里，不要猜
+5. **引擎行为**：服务器端机制（如模块 require 语义、Memory 序列化）查 `@screeps/engine` / `@screeps/driver` 源码或官方文档，不靠推测
 
 ## 代码编写
 
